@@ -1,0 +1,158 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tqdm import trange, tqdm
+import random
+import os
+
+SEED = 42
+np.random.seed(SEED)
+random.seed(SEED)
+tf.random.set_seed(SEED)
+
+-
+# We'll create 2D images (range bins x doppler bins) where different target types
+# leave characteristic patterns: steady doppler line (aircraft), rotor oscillation (drone),
+# bursty micro-signatures (bird), or background clutter (noise + ground echoes).
+
+IMG_R = 128   # range bins
+IMG_D = 128   # Doppler bins
+N_PER_CLASS = 800
+
+def synth_rdm_aircraft():
+    img = np.zeros((IMG_R, IMG_D), dtype=np.float32)
+    # Aircraft: strong continuous line over Doppler (constant radial velocity) at some range
+    r = np.random.randint(20, IMG_R-20)
+    doppler_profile = np.exp(-((np.arange(IMG_D) - IMG_D//2)**2)/(2*(IMG_D*0.08)**2))
+    amp = np.random.uniform(0.6, 1.0)
+    img[r:r+3, :] += amp * doppler_profile
+    # Add subtle spread from wing/structure -> low-frequency smear
+    img[r-2:r+5, :] += 0.05 * np.convolve(doppler_profile, np.ones(5)/5, mode='same')[...,None].squeeze()[:IMG_D]
+    # Add background clutter
+    img += 0.06*np.random.randn(*img.shape)
+    return np.clip(img, 0, 1)
+
+def synth_rdm_drone():
+    img = np.zeros((IMG_R, IMG_D), dtype=np.float32)
+    # Drone: rotor blades -> periodic micro-Doppler sidebands around main body Doppler
+    r = np.random.randint(15, IMG_R-15)
+    base = np.exp(-((np.arange(IMG_D) - IMG_D//2)**2)/(2*(IMG_D*0.04)**2))
+    amp = np.random.uniform(0.4, 0.9)
+    # main body
+    img[r-1:r+2, :] += amp * base
+    # rotor sidebands: sinusoidally modulate doppler offset over time (columns -> slow time)
+    t = np.linspace(0, 4*np.pi, IMG_D)
+    for k in range(1,4):
+        shift = (k*2) * np.sin(0.5*t + np.random.rand()*2*np.pi)
+        cols = np.arange(IMG_D)
+        # create each column with shifted gaussian
+        for i, sh in enumerate(shift):
+            idx = int(np.clip(IMG_D//2 + sh, 0, IMG_D-1))
+            img[r-2:r+3, i] += 0.15*np.exp(-((idx - cols[i])**2)/(2*(3+2*k)**2))
+    img += 0.08*np.random.randn(*img.shape)
+    return np.clip(img, 0, 1)
+
+def synth_rdm_bird():
+    img = np.zeros((IMG_R, IMG_D), dtype=np.float32)
+    # Bird: intermittent bursts (wingbeats) producing short micro-doppler blobs across Doppler
+    r = np.random.randint(10, IMG_R-10)
+    n_bursts = np.random.randint(3,9)
+    for _ in range(n_bursts):
+        c = np.random.randint(0, IMG_D-8)
+        f = np.random.randint(5, 20) + IMG_D//2
+        h = np.random.randint(1,4)
+        w = np.random.randint(3,10)
+        img[r-h:r+h, c:c+w] += np.random.uniform(0.4, 1.0)
+    img += 0.07*np.random.randn(*img.shape)
+    return np.clip(img, 0, 1)
+
+def synth_rdm_clutter():
+    img = 0.2*np.random.rand(IMG_R, IMG_D).astype(np.float32)
+    # Add ground return: strong near-range rows
+    img[:8, :] += 0.4*np.exp(-((np.arange(IMG_D)-IMG_D//2)**2)/(2*(IMG_D*0.15)**2))
+    img += 0.06*np.random.randn(*img.shape)
+    return np.clip(img, 0, 1)
+
+generators = [synth_rdm_aircraft, synth_rdm_drone, synth_rdm_bird, synth_rdm_clutter]
+labels_names = ["aircraft","drone","bird","clutter"]
+
+# Build dataset
+X = []
+y = []
+for cls_idx, gen in enumerate(generators):
+    for _ in trange(N_PER_CLASS, desc=f"Gen {labels_names[cls_idx]}", leave=False):
+        X.append(gen())
+        y.append(cls_idx)
+
+X = np.array(X)[..., np.newaxis]  # shape (N, R, D, 1)
+y = np.array(y)
+
+# Shuffle & split
+idx = np.random.permutation(len(X))
+X = X[idx]; y = y[idx]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=SEED, stratify=y)
+
+print("Shapes:", X_train.shape, X_test.shape)
+
+
+def make_model(input_shape=(IMG_R, IMG_D, 1), n_classes=4):
+    inp = layers.Input(shape=input_shape)
+    x = layers.Conv2D(16, 3, padding='same', activation='relu')(inp)
+    x = layers.MaxPooling2D(2)(x)
+    x = layers.Conv2D(32, 3, padding='same', activation='relu')(x)
+    x = layers.MaxPooling2D(2)(x)
+    x = layers.Conv2D(64, 3, padding='same', activation='relu')(x)
+    x = layers.MaxPooling2D(2)(x)
+    x = layers.Conv2D(128, 3, padding='same', activation='relu')(x)
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(128, activation='relu')(x)
+    x = layers.Dropout(0.4)(x)
+    out = layers.Dense(n_classes, activation='softmax')(x)
+    model = models.Model(inp, out)
+    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+model = make_model()
+model.summary()
+
+
+EPOCHS = 20
+BATCH = 64
+
+history = model.fit(X_train, y_train, validation_split=0.12,
+                    epochs=EPOCHS, batch_size=BATCH, verbose=2)
+
+
+loss, acc = model.evaluate(X_test, y_test, verbose=0)
+print(f"Test accuracy: {acc*100:.2f}%")
+
+# show some test examples + predictions
+preds = model.predict(X_test)
+pred_labels = np.argmax(preds, axis=1)
+
+n_show = 8
+plt.figure(figsize=(12,4))
+for i in range(n_show):
+    plt.subplot(2,4,i+1)
+    img = X_test[i].squeeze()
+    plt.imshow(img, origin='lower', aspect='auto')
+    plt.title(f"T:{labels_names[y_test[i]]}\nP:{labels_names[pred_labels[i]]}")
+    plt.axis('off')
+plt.tight_layout()
+plt.show()
+
+# Plot confusion matrix
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+cm = confusion_matrix(y_test, pred_labels)
+disp = ConfusionMatrixDisplay(cm, display_labels=labels_names)
+disp.plot(cmap='Blues', xticks_rotation='45')
+plt.title("Confusion matrix")
+plt.show()
+
+# Save model
+os.makedirs("models", exist_ok=True)
+model.save("models/radar_rdm_cnn.h5")
+print("Model saved to models/radar_rdm_cnn.h5")
