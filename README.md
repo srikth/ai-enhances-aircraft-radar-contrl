@@ -70,6 +70,10 @@ This project can be extended into interdisciplinary research combining:
 - AI + Electromagnetic theory
 - Quantum-enhanced signal analysis
 - Intelligent autonomous defense systems
+ ## Research Background
+Radar systems are traditionally based on signal processing, detection theory, and electromagnetic wave propagation principles. Classical radar foundations are discussed in Skolnik’s Radar Handbook. 
+Recent advancements in machine learning have enabled intelligent target detection and classification using neural networks. Deep learning architectures, as formalized by Goodfellow et al., provide robust feature extraction capabilities applicable to radar signal processing.
+This project integrates classical radar principles with modern AI-based classification methods to enhance detection accuracy and robustness under noisy conditions.
 ## References
  Skolnik, Merrill I., Radar Handbook, McGraw-Hill.
 → Classical radar theory foundation.
