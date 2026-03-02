@@ -70,6 +70,17 @@ This project can be extended into interdisciplinary research combining:
 - AI + Electromagnetic theory
 - Quantum-enhanced signal analysis
 - Intelligent autonomous defense systems
+## References
+ Skolnik, Merrill I., Radar Handbook, McGraw-Hill.
+→ Classical radar theory foundation.
+
+Goodfellow, Ian, Bengio, Yoshua, Courville, Aaron, Deep Learning, MIT Press.
+→ Neural network fundamentals.
+
+Kim et al., “Deep Learning-Based Radar Target Classification,” IEEE Radar Conference, 2018.
+→ ML for radar signal classification
+## statement
+  This work aims to extend intelligent systems toward interdisciplinary scientific applications including signal physics, radar, and defense technology.
 
 ## Author
 Srikanth Shanmugam
